@@ -1,4 +1,3 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Solar Row Planner</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -78,8 +77,7 @@ button:hover { filter: brightness(1.07); }
 .mode input:checked + .mode-body { border-color: var(--panel); box-shadow: inset 0 0 0 1px var(--panel); background: var(--sheet); }
 
 .out { display: grid; gap: 20px; min-width: 0; }
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-@media (max-width: 1100px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
 .tile { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; min-width: 0; }
 .tile .k { font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
 .tile .v { font-family: var(--f-display); font-weight: 700; font-size: 38px; line-height: 1.05; margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -104,6 +102,8 @@ svg .tw { font: 500 13px var(--f-mono); fill: var(--sun); }
 svg .th { font: 500 13px var(--f-mono); fill: var(--heat); }
 svg .rw { stroke: var(--sun); stroke-width: 2.5; fill: none; }
 svg .rs { stroke: var(--heat); stroke-width: 2.5; fill: none; stroke-dasharray: 8 5; }
+svg .gs { stroke: var(--sun); stroke-width: 6; opacity: .6; }
+svg .rc { stroke: var(--sun); stroke-width: 2; fill: none; stroke-dasharray: 3 4; }
 svg .arc-w { stroke: var(--sun); stroke-width: 1.5; fill: none; }
 svg .arc-p { stroke: var(--ink); stroke-width: 1.5; fill: none; }
 svg .shade { fill: var(--shade); }
@@ -171,7 +171,7 @@ ul.notes { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 14
         <legend>3 · Mounting</legend>
         <div class="inline">
           <label class="f">Tilt angle <span class="u">degrees from horizontal</span>
-            <input type="number" id="tilt" min="0" max="85" step="0.5" value="22">
+            <input type="number" id="tilt" min="0" max="85" step="0.01" value="22">
           </label>
           <button type="button" id="tiltLat" title="Set the tilt equal to the latitude">Use latitude</button>
         </div>
@@ -200,7 +200,7 @@ ul.notes { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 14
       <div class="tiles" id="tiles"></div>
       <div class="card figure">
         <h2>Side view, looking west</h2>
-        <div class="scroll"><svg id="svg" viewBox="0 0 1000 550" role="img" aria-label="Side view of two solar panel rows with dimensions"></svg></div>
+        <div class="scroll"><svg id="svg" viewBox="0 0 1000 600" role="img" aria-label="Side view of two solar panel rows with dimensions"></svg></div>
         <ul class="legend">
           <li><span class="sw"></span>Winter sun at the edge of your shade-free window</li>
           <li><span class="sw h"></span>Summer sun at solar noon</li>
@@ -266,23 +266,23 @@ function sunAt(latAbs, decDeg, hour) {
 // Minimum clear gap between rows so the winter sun never shades the next row inside [from, to].
 function rowGap(latAbs, L, tiltDeg, from, to) {
   const rise = L * Math.sin(tiltDeg * D2R);
-  let worst = { gap: 0, hour: from, alt: 0, az: 0, prof: 0 };
+  let worst = null;
   for (let t = from; t <= to + 1e-9; t += 0.02) {
     const s = sunAt(latAbs, -DECL, t);
     if (s.alt <= 0.02) return { gap: Infinity };
     const c = Math.cos(s.az);
     if (c <= 0.01) continue;
-    const gap = rise * c / Math.tan(s.alt);
-    if (gap > worst.gap) worst = { gap, hour: t, alt: s.alt, az: s.az, prof: Math.atan(Math.tan(s.alt) / c) };
+    const k = c / Math.tan(s.alt); // ground shadow length per unit of height, north-south
+    if (!worst || k > worst.k) worst = { k, gap: rise * k, hour: t, alt: s.alt, az: s.az, prof: Math.atan(Math.tan(s.alt) / c) };
   }
-  if (worst.gap === 0) { const s = sunAt(latAbs, -DECL, from); worst.alt = s.alt; worst.az = s.az; worst.prof = s.alt; }
+  if (!worst) { const s = sunAt(latAbs, -DECL, from); worst = { k: 0, gap: 0, hour: from, alt: s.alt, az: s.az, prof: s.alt }; }
   return worst;
 }
 function solve(inp, from, to) {
   const latAbs = Math.abs(inp.lat), b = inp.tilt * D2R;
   const w = rowGap(latAbs, inp.L, inp.tilt, from, to);
   const F = inp.L * Math.cos(b), rise = inp.L * Math.sin(b);
-  return { ...w, F, rise, H: inp.c + rise, pitch: F + w.gap, gcr: inp.L / (F + w.gap), from, to };
+  return { ...w, F, rise, H: inp.c + rise, pitch: F + w.gap, gcr: inp.L / (F + w.gap), shadow: (inp.c + rise) * w.k, from, to };
 }
 
 // ---- inputs
@@ -314,7 +314,7 @@ function drawSvg(r, inp, sum) {
   const { L, tilt, c } = inp, b = tilt * D2R, cb = Math.cos(b), sb = Math.sin(b);
   const { F, rise, H, pitch: D, gap: g } = r;
   const gy = 410, x0 = 210;
-  const s = Math.min(740 / (D + F), 200 / Math.max(H, 1));
+  const s = Math.min(740 / Math.max(D + F, F + r.shadow), 200 / Math.max(H, 1));
   const X = w => x0 + w * s, Y = h => gy - h * s;
   const eqLeft = inp.lat >= 0 ? "SOUTH" : "NORTH", eqRight = inp.lat >= 0 ? "NORTH" : "SOUTH";
   const o = [];
@@ -342,6 +342,11 @@ function drawSvg(r, inp, sum) {
   const E = [X(D), Y(c)], pr = r.prof, cp = Math.cos(pr), sp = Math.sin(pr);
   const len = (g * s) / Math.max(cp, 0.05) + 110;
   const S = [E[0] - len * cp, E[1] - len * sp];
+  // full shadow: the ray continues past the next row down to the ground
+  const tipX = X(F + r.shadow);
+  o.push(`<line class="gs" x1="${X(F)}" y1="${gy}" x2="${tipX}" y2="${gy}"/>`);
+  o.push(`<line class="rc" x1="${E[0]}" y1="${E[1]}" x2="${tipX}" y2="${gy}"/>`);
+  o.push(`<circle class="dot" cx="${tipX}" cy="${gy}" r="4.5"/>`);
   // shadow zone behind the front row
   o.push(`<polygon class="shade" points="${X(F)},${Y(H)} ${E[0]},${E[1]} ${E[0]},${gy} ${X(F)},${gy}"/>`);
 
@@ -401,6 +406,7 @@ function drawSvg(r, inp, sum) {
   hdim(X(0), X(F), gy + 34, `Footprint ${inch(F)}`);
   if (g > 0.05) hdim(X(F), X(D), gy + 34, `Row gap ${inch(g)}`);
   hdim(X(0), X(D), gy + 88, `Row pitch ${inch(D)}`);
+  if (r.shadow > 0.05) hdim(X(F), tipX, gy + 142, `Total shadow length ${inch(r.shadow)}`);
   $("svg").innerHTML = o.join("");
 }
 
@@ -428,7 +434,8 @@ function render() {
     ["Panel azimuth", `${az}<small>° ${eq}</small>`, `True ${eq} for ${where}`],
     ["Top edge height", `${f1(r.H)}<small>in</small>`, `${ftIn(r.H)}. Rise along the slope ${inch(r.rise)}`],
     ["Row gap", `${f1(r.gap)}<small>in</small>`, `Clear ground between rows. ${mode.name} window`],
-    ["Row pitch", `${f1(r.pitch)}<small>in</small>`, `${ftIn(r.pitch)}. Ground coverage ${Math.round(r.gcr * 100)}%`]
+    ["Row pitch", `${f1(r.pitch)}<small>in</small>`, `${ftIn(r.pitch)}. Ground coverage ${Math.round(r.gcr * 100)}%`],
+    ["Total shadow", `${f1(r.shadow)}<small>in</small>`, `${ftIn(r.shadow)} from the top edge to the ground at ${hrLabel(Math.round(r.hour))}`]
   ].map(t => `<div class="tile"><div class="k">${t[0]}</div><div class="v">${t[1]}</div><div class="s">${t[2]}</div></div>`).join("");
 
   drawSvg(r, inp, sum);
@@ -437,9 +444,9 @@ function render() {
   let rows = "";
   for (const k of ["9", "8", "10"]) {
     const m = MODES[k], x = solve(inp, m.from, m.to);
-    rows += `<tr class="pick ${k === inp.mode ? "sel" : ""}" data-mode="${k}"><td>${m.name}</td><td class="n">${hrLabel(m.from)}–${hrLabel(m.to)}</td><td class="n">${f1(x.gap)}″</td><td class="n">${f1(x.pitch)}″</td><td class="n">${Math.round(x.gcr * 100)}%</td></tr>`;
+    rows += `<tr class="pick ${k === inp.mode ? "sel" : ""}" data-mode="${k}"><td>${m.name}</td><td class="n">${hrLabel(m.from)}–${hrLabel(m.to)}</td><td class="n">${f1(x.gap)}″</td><td class="n">${f1(x.shadow)}″</td><td class="n">${f1(x.pitch)}″</td><td class="n">${Math.round(x.gcr * 100)}%</td></tr>`;
   }
-  $("cmp").innerHTML = `<tr><th>Window</th><th>Hours</th><th>Row gap</th><th>Pitch</th><th>Cover</th></tr>${rows}`;
+  $("cmp").innerHTML = `<tr><th>Window</th><th>Hours</th><th>Row gap</th><th>Shadow</th><th>Pitch</th><th>Cover</th></tr>${rows}`;
   document.querySelectorAll("#cmp tr.pick").forEach(tr => tr.addEventListener("click", () => {
     document.querySelector(`input[name=mode][value="${tr.dataset.mode}"]`).checked = true; render();
   }));
@@ -451,6 +458,7 @@ function render() {
     <dt>Angle seen in this side view</dt><dd>${f1(r.prof / D2R)}°</dd>
     <dt>Winter noon elevation (Dec 21)</dt><dd>${f1(winterNoon)}°</dd>
     <dt>Summer noon elevation (Jun 21)</dt><dd>${f1(sum.summerAlt / D2R)}° ${sum.summerFromEq ? "" : "(" + (inp.lat >= 0 ? "north" : "south") + " of overhead)"}</dd>
+    <dt>Shadow tip from front low edge</dt><dd>${f1(r.F + r.shadow)}″</dd>
     <dt>Panel area</dt><dd>${f1(inp.L * inp.W)} in² (${f1(inp.L * inp.W / 144)} ft²)</dd>
     <dt>Land per panel (pitch × width)</dt><dd>${f1(r.pitch * inp.W / 144)} ft²</dd>`;
 
@@ -465,6 +473,7 @@ function render() {
   notes.push(`<li>Hours are solar time, where the sun is highest at 12:00.${noon}</li>`);
   notes.push(`<li>Point the panels to true ${eq} (${az}°). If you set out with a compass, correct for the local magnetic declination, which is small in Bangladesh.</li>`);
   notes.push(`<li>The row gap is sized on Dec 21, the lowest sun of the year, at whichever hour in your window needs the most space. Every other day of winter needs less.</li>`);
+  notes.push(`<li>Total shadow length is how far the shadow of the panel's top edge reaches along the ground, measured from the point directly below that edge. The row gap is the part of it that falls before the next row's lower edge. The dotted line shows the rest running under the next row.</li>`);
   notes.push(`<li>The drawing is a north–south cut through level ground with rows running east–west. The amber line just clears the lower edge of the next row.</li>`);
   $("notes").innerHTML = notes.join("").replace(/^<div class="warn">(.*?)<\/div>/, '<li class="warn" style="list-style:none;margin-left:-18px">$1</li>');
 }
@@ -483,5 +492,3 @@ document.querySelectorAll("input[name=mode]").forEach(el => el.addEventListener(
 $("form").addEventListener("submit", e => { e.preventDefault(); render(); if (innerWidth < 900) $("out").scrollIntoView({ behavior: "smooth", block: "start" }); });
 $("district").dispatchEvent(new Event("input"));
 </script>
-
-</body></html>
